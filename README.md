@@ -6,11 +6,15 @@ CodeBuddy hooks report session state to Herdr. This adds no Herdr process or scr
 
 | CodeBuddy event | Herdr report |
 | --- | --- |
-| `SessionStart` | `idle`, with the session ID and `codebuddy --resume` command when available |
+| `SessionStart` (`startup`, `resume`, `clear`, `compact`) | `idle`, with the session ID and `codebuddy --resume` command when available |
 | `UserPromptSubmit` | `working` |
+| `PreToolUse`, `PostToolUse` | `working` |
 | `Stop` | `idle` |
 | `Notification` (`permission_prompt`) | `blocked` |
 | `SessionEnd` | release the agent |
+
+The tool events keep the reported state honest: approving a permission
+prompt otherwise left the pane reported as `blocked` until `Stop`.
 
 ## Install
 

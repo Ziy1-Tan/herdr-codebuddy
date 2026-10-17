@@ -118,6 +118,7 @@ test('installer is idempotent and uninstall preserves unrelated hooks', t => {
     runInstaller('install');
     const installed = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
     assert.equal(installed.theme, 'dark');
+    assert.equal(installed.hooks.SessionStart[0].matcher, 'startup|resume|clear|compact');
     assert.equal(installed.hooks.Stop.length, 2);
     for (const event of ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'Notification', 'SessionEnd']) {
       assert.equal(installed.hooks[event].filter(entry => entry.hooks?.some(hook => hook.command?.includes('herdr-codebuddy-hook.js'))).length, 1);

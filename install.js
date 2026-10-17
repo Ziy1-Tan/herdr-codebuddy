@@ -7,7 +7,10 @@ const path = require('node:path');
 
 const COMMAND = 'node "$HOME/.codebuddy/hooks/herdr-codebuddy-hook.js"';
 const EVENTS = {
-  SessionStart: 'startup|resume',
+  // clear and compact also start a session with a new id. Without them the
+  // pane keeps an older id, and a Herdr server restart resumes the session
+  // from before /clear or the compaction.
+  SessionStart: 'startup|resume|clear|compact',
   UserPromptSubmit: null,
   PreToolUse: null,
   PostToolUse: null,
