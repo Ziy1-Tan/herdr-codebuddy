@@ -6,6 +6,11 @@ const { spawn } = require('node:child_process');
 const EVENT_STATES = {
   SessionStart: 'idle',
   UserPromptSubmit: 'working',
+  // PreToolUse runs before the permission system and PostToolUse after the tool
+  // succeeds, so together they clear a 'blocked' left by an approved
+  // permission_prompt instead of holding it until Stop.
+  PreToolUse: 'working',
+  PostToolUse: 'working',
   Stop: 'idle',
   Notification: 'blocked',
 };

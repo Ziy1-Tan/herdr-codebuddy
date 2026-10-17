@@ -36,6 +36,8 @@ test('maps lifecycle and permission events to report-agent states', () => {
   const cases = [
     ['SessionStart', { session_id: 'session-abc' }, 'idle'],
     ['UserPromptSubmit', {}, 'working'],
+    ['PreToolUse', {}, 'working'],
+    ['PostToolUse', {}, 'working'],
     ['Stop', {}, 'idle'],
     ['Notification', { notification_type: 'permission_prompt' }, 'blocked'],
   ];
@@ -117,7 +119,7 @@ test('installer is idempotent and uninstall preserves unrelated hooks', t => {
     const installed = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
     assert.equal(installed.theme, 'dark');
     assert.equal(installed.hooks.Stop.length, 2);
-    for (const event of ['SessionStart', 'UserPromptSubmit', 'Stop', 'Notification', 'SessionEnd']) {
+    for (const event of ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'Notification', 'SessionEnd']) {
       assert.equal(installed.hooks[event].filter(entry => entry.hooks?.some(hook => hook.command?.includes('herdr-codebuddy-hook.js'))).length, 1);
     }
     assert.ok(fs.existsSync(path.join(settingsDir, 'hooks', 'herdr-codebuddy-hook.js')));
@@ -127,7 +129,7 @@ test('installer is idempotent and uninstall preserves unrelated hooks', t => {
     assert.equal(uninstalled.theme, 'dark');
     assert.equal(uninstalled.hooks.Stop.length, 1);
     assert.equal(uninstalled.hooks.Stop[0].hooks[0].command, 'echo user-hook');
-    for (const event of ['SessionStart', 'UserPromptSubmit', 'Notification', 'SessionEnd']) {
+    for (const event of ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Notification', 'SessionEnd']) {
       assert.ok(!Object.hasOwn(uninstalled.hooks, event));
     }
     assert.ok(!fs.existsSync(path.join(settingsDir, 'hooks', 'herdr-codebuddy-hook.js')));

@@ -9,6 +9,8 @@ const COMMAND = 'node "$HOME/.codebuddy/hooks/herdr-codebuddy-hook.js"';
 const EVENTS = {
   SessionStart: 'startup|resume',
   UserPromptSubmit: null,
+  PreToolUse: null,
+  PostToolUse: null,
   Stop: null,
   Notification: 'permission_prompt',
   SessionEnd: null,
