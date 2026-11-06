@@ -2,6 +2,9 @@
   "name": "herdr-codebuddy",
   "version": "0.1.0",
   "description": "CodeBuddy hooks adapter for Herdr; install with curl without cloning",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "test": "node --test test.js"
   }
