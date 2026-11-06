@@ -5,140 +5,136 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const COMMAND = 'node "$HOME/.codebuddy/hooks/herdr-codebuddy-hook.js"';
-const EVENTS = {
-  // /clear starts a new session, so without 'clear' the pane keeps the older
-  // id and a Herdr server restart resumes the session from before the clear.
-  // 'compact' keeps the session id but tells the pane it is still working.
-  SessionStart: 'startup|resume|clear|compact',
-  UserPromptSubmit: null,
-  PreToolUse: null,
-  PostToolUse: null,
-  PostToolUseFailure: null,
-  Stop: null,
-  Notification: 'permission_prompt',
-  SessionEnd: null,
-};
+const { EVENTS } = require('./herdr-codebuddy-hook.js');
 
-function removeOurHook(entries) {
+const HOOK_NAME = 'herdr-codebuddy-hook.js';
+const COMMAND = `node "$HOME/.codebuddy/hooks/${HOOK_NAME}"`;
+
+// Match on the file name, so a hook registered by an older install (different
+// quoting or path) is replaced instead of duplicated.
+const isOurHook = hook => typeof hook?.command === 'string' && hook.command.includes(HOOK_NAME);
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function removeOurHooks(entries) {
   return entries.flatMap(entry => {
     if (!Array.isArray(entry?.hooks)) return [entry];
-    const hooks = entry.hooks.filter(hook => hook.command !== COMMAND);
+    const hooks = entry.hooks.filter(hook => !isOurHook(hook));
     if (hooks.length === entry.hooks.length) return [entry];
     return hooks.length ? [{ ...entry, hooks }] : [];
   });
 }
 
+// Write through a temp file so an interrupted run never leaves a truncated
+// settings.json. rename() replaces the target atomically on both POSIX and
+// Windows (MoveFileEx with MOVEFILE_REPLACE_EXISTING).
+function writeSettings(file, content) {
+  const temp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(temp, content, { mode: 0o600 });
+  try {
+    fs.renameSync(temp, file);
+  } catch (error) {
+    fs.rmSync(temp, { force: true });
+    throw error;
+  }
+}
+
+function readSettings(file) {
+  let original;
+  try {
+    original = fs.readFileSync(file, 'utf8');
+  } catch (error) {
+    if (error.code === 'ENOENT') return { original: null, settings: {} };
+    throw new Error(`Cannot read ${file}: ${error.message}`);
+  }
+
+  let settings;
+  try {
+    settings = JSON.parse(original);
+  } catch (error) {
+    throw new Error(`Cannot parse ${file}: ${error.message}`);
+  }
+  if (!isPlainObject(settings)) throw new Error(`${file} must contain a JSON object`);
+  return { original, settings };
+}
+
 function main() {
   const action = process.argv[2] || 'install';
-  if (!['install', 'uninstall'].includes(action)) {
+  if (action !== 'install' && action !== 'uninstall') {
     throw new Error('Usage: node install.js [install|uninstall]');
   }
 
   const dir = path.join(os.homedir(), '.codebuddy');
   const settingsFile = path.join(dir, 'settings.json');
-  const hookFile = path.join(dir, 'hooks', 'herdr-codebuddy-hook.js');
+  const hookFile = path.join(dir, 'hooks', HOOK_NAME);
   fs.mkdirSync(dir, { recursive: true });
 
-  let original = null;
-  let settings = {};
-  try {
-    original = fs.readFileSync(settingsFile, 'utf8');
-    settings = JSON.parse(original);
-  } catch (error) {
-    if (error.code !== 'ENOENT') throw new Error(`Cannot read ${settingsFile}: ${error.message}`);
-  }
-  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
-    throw new Error(`${settingsFile} must contain a JSON object`);
-  }
-
+  const { original, settings } = readSettings(settingsFile);
   const originalHooks = settings.hooks;
-  if (originalHooks !== undefined && (!originalHooks || typeof originalHooks !== 'object' || Array.isArray(originalHooks))) {
+  if (originalHooks !== undefined && !isPlainObject(originalHooks)) {
     throw new Error('settings.hooks must be an object');
   }
 
-  const hooks = { ...(originalHooks || {}) };
-  for (const [event, matcher] of Object.entries(EVENTS)) {
-    const entries = originalHooks?.[event] ?? [];
+  const hooks = { ...originalHooks };
+  for (const [event, spec] of Object.entries(EVENTS)) {
+    const entries = hooks[event] ?? [];
     if (!Array.isArray(entries)) throw new Error(`settings.hooks.${event} must be an array`);
 
-    const remaining = removeOurHook(entries);
+    const remaining = removeOurHooks(entries);
     if (action === 'install') {
-      const hook = { type: 'command', command: COMMAND };
-      const entry = { hooks: [hook] };
-      if (matcher) entry.matcher = matcher;
+      const entry = { hooks: [{ type: 'command', command: COMMAND }] };
+      if (spec.matcher) entry.matcher = spec.matcher;
       hooks[event] = [...remaining, entry];
     } else if (remaining.length) {
       hooks[event] = remaining;
-    } else if (entries.length) {
+    } else {
       delete hooks[event];
     }
   }
 
   const updated = { ...settings };
-  if (originalHooks !== undefined || action === 'install') updated.hooks = hooks;
-  const content = `${JSON.stringify(updated, null, 2)}\n`;
-  const unchanged = original !== null && JSON.stringify(settings) === JSON.stringify(updated);
+  if (action === 'install' || Object.keys(hooks).length) updated.hooks = hooks;
+  else delete updated.hooks;
 
-  let settingsBackup = null;
-  if (!unchanged) {
+  const changed = JSON.stringify(settings) !== JSON.stringify(updated);
+  let backup = null;
+  if (changed) {
     if (original !== null) {
-      settingsBackup = `${settingsFile}.herdr-codebuddy-${Date.now()}.bak`;
-      fs.copyFileSync(settingsFile, settingsBackup);
+      backup = `${settingsFile}.herdr-codebuddy-${Date.now()}.bak`;
+      fs.copyFileSync(settingsFile, backup);
     }
-    const tempFile = `${settingsFile}.${process.pid}.tmp`;
-    fs.writeFileSync(tempFile, content, { mode: 0o600 });
-    try {
-      fs.renameSync(tempFile, settingsFile);
-    } catch (error) {
-      if (process.platform !== 'win32' || !fs.existsSync(settingsFile)) {
-        fs.rmSync(tempFile, { force: true });
-        throw error;
-      }
-
-      const previousFile = `${settingsFile}.${process.pid}.previous`;
-      fs.renameSync(settingsFile, previousFile);
-      try {
-        fs.renameSync(tempFile, settingsFile);
-        fs.rmSync(previousFile, { force: true });
-      } catch (replaceError) {
-        fs.renameSync(previousFile, settingsFile);
-        fs.rmSync(tempFile, { force: true });
-        throw replaceError;
-      }
-    }
+    writeSettings(settingsFile, `${JSON.stringify(updated, null, 2)}\n`);
   }
+  const backupNote = backup ? ` (backup: ${backup})` : '';
 
-  const lines = [];
-  const backupNote = settingsBackup ? ` (backup: ${settingsBackup})` : '';
-
-  if (action === 'install') {
-    fs.mkdirSync(path.dirname(hookFile), { recursive: true });
-    // One copy deep, so a bad update can be rolled back by copying the .bak back.
-    const source = path.join(__dirname, 'herdr-codebuddy-hook.js');
-    let replaced = null;
-    if (!fs.existsSync(hookFile)) {
-      fs.copyFileSync(source, hookFile);
-    } else if (!fs.readFileSync(hookFile).equals(fs.readFileSync(source))) {
-      fs.copyFileSync(hookFile, `${hookFile}.bak`);
-      fs.copyFileSync(source, hookFile);
-      replaced = `Replaced hook script ${hookFile} (backup: ${hookFile}.bak).`;
-    }
-
-    if (!unchanged) lines.push(`Installed hooks in ${settingsFile}${backupNote}.`);
-    else if (!replaced) lines.push(`Hooks already installed in ${settingsFile}.`);
-    if (replaced) lines.push(replaced);
-    lines.push('Restart CodeBuddy to load them.');
-  } else {
+  if (action === 'uninstall') {
     const existed = fs.existsSync(hookFile) || fs.existsSync(`${hookFile}.bak`);
     fs.rmSync(hookFile, { force: true });
     fs.rmSync(`${hookFile}.bak`, { force: true });
-    lines.push(unchanged && !existed
-      ? `No Herdr CodeBuddy hooks in ${settingsFile}.`
-      : `Removed Herdr CodeBuddy hooks from ${settingsFile}${backupNote}.`);
+    console.log(changed || existed
+      ? `Removed Herdr CodeBuddy hooks from ${settingsFile}${backupNote}.`
+      : `No Herdr CodeBuddy hooks in ${settingsFile}.`);
+    return;
   }
 
-  console.log(lines.join('\n'));
+  fs.mkdirSync(path.dirname(hookFile), { recursive: true });
+  // One copy deep, so a bad update can be rolled back by copying the .bak back.
+  const sourceFile = path.join(__dirname, HOOK_NAME);
+  const exists = fs.existsSync(hookFile);
+  const replaced = exists && !fs.readFileSync(hookFile).equals(fs.readFileSync(sourceFile));
+  if (replaced) {
+    fs.copyFileSync(hookFile, `${hookFile}.bak`);
+    fs.copyFileSync(sourceFile, hookFile);
+  } else if (!exists) {
+    fs.copyFileSync(sourceFile, hookFile);
+  }
+
+  if (changed) console.log(`Installed hooks in ${settingsFile}${backupNote}.`);
+  else if (!replaced) console.log(`Hooks already installed in ${settingsFile}.`);
+  if (replaced) console.log(`Replaced hook script ${hookFile} (backup: ${hookFile}.bak).`);
+  console.log('Restart CodeBuddy to load them.');
 }
 
 try {
