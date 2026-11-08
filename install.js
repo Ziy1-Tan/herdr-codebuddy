@@ -67,8 +67,9 @@ function main() {
   }
 
   const dir = path.join(os.homedir(), '.codebuddy');
+  const hooksDir = path.join(dir, 'hooks');
   const settingsFile = path.join(dir, 'settings.json');
-  const hookFile = path.join(dir, 'hooks', HOOK_NAME);
+  const hookFile = path.join(hooksDir, HOOK_NAME);
   fs.mkdirSync(dir, { recursive: true });
 
   const { original, settings } = readSettings(settingsFile);
@@ -119,7 +120,7 @@ function main() {
     return;
   }
 
-  fs.mkdirSync(path.dirname(hookFile), { recursive: true });
+  fs.mkdirSync(hooksDir, { recursive: true });
   // One copy deep, so a bad update can be rolled back by copying the .bak back.
   const sourceFile = path.join(__dirname, HOOK_NAME);
   const exists = fs.existsSync(hookFile);
