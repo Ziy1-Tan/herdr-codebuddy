@@ -1,6 +1,7 @@
 # herdr-codebuddy
 
 [![test](https://github.com/Ziy1-Tan/herdr-codebuddy/actions/workflows/test.yml/badge.svg)](https://github.com/Ziy1-Tan/herdr-codebuddy/actions/workflows/test.yml)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 CodeBuddy hooks report session state to Herdr. This adds no Herdr process or screen detection.
 
