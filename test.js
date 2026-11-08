@@ -30,7 +30,9 @@ const STATES = [
   ['PreToolUse', {}, 'working'],
   ['PostToolUse', {}, 'working'],
   ['PostToolUseFailure', {}, 'working'],
+  ['PermissionDenied', {}, 'working'],
   ['Stop', {}, 'idle'],
+  ['StopFailure', {}, 'idle'],
   ['Notification', { notification_type: 'permission_prompt' }, 'blocked'],
 ];
 
@@ -97,9 +99,18 @@ test('omits recovery data for invalid session IDs', () => {
 });
 
 test('releases the reported agent on SessionEnd', () => {
-  const result = runHook('SessionEnd');
-  assert.deepEqual(result.args.slice(0, 3), ['pane', 'release-agent', 'pane-test']);
-  assert.ok(!result.args.includes('--state'));
+  for (const reason of ['logout', 'prompt_input_exit', 'other']) {
+    const result = runHook('SessionEnd', { reason });
+    assert.deepEqual(result.args.slice(0, 3), ['pane', 'release-agent', 'pane-test']);
+    assert.ok(!result.args.includes('--state'));
+  }
+});
+
+// /clear ends the conversation, not the process.
+test('keeps the pane reported as idle on /clear', () => {
+  const result = runHook('SessionEnd', { reason: 'clear' });
+  assert.deepEqual(result.args.slice(0, 3), ['pane', 'report-agent', 'pane-test']);
+  assert.equal(arg(result, '--state'), 'idle');
 });
 
 test('ignores unrelated notifications and malformed JSON', () => {
