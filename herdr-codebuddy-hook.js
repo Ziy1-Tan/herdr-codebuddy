@@ -3,21 +3,20 @@
 
 const { spawn } = require('node:child_process');
 
-// Shared with install.js: one row per CodeBuddy event, holding both the matcher
-// to register and the Herdr state to report. A row without a `state` releases
-// the agent instead of reporting one.
+// Shared with install.js: the matcher to register and the state to report.
 const EVENTS = {
-  // /clear starts a new session, so the pane must follow the new id; 'compact'
-  // keeps the session and continues the turn, so the pane is still working.
   SessionStart: { matcher: 'startup|resume|clear|compact', state: 'idle' },
   UserPromptSubmit: { state: 'working' },
-  // PreToolUse runs before the permission prompt; the events after it clear a
-  // 'blocked' left by an approved prompt, and the next tool call recovers after
-  // a denied one instead of holding 'blocked' until Stop.
+  // Nothing fires for the answer to a prompt, so the tool events are the only
+  // thing that clears `blocked`, and a long approved tool keeps it.
   PreToolUse: { state: 'working' },
   PostToolUse: { state: 'working' },
   PostToolUseFailure: { state: 'working' },
+  // The auto-mode classifier denies without a tool event following.
+  PermissionDenied: { state: 'working' },
   Stop: { state: 'idle' },
+  // A turn that ends on an API error sends no Stop.
+  StopFailure: { state: 'idle' },
   Notification: { matcher: 'permission_prompt', state: 'blocked' },
   SessionEnd: {},
 };
@@ -41,22 +40,24 @@ async function main() {
   const name = event?.hook_event_name;
   if (!Object.hasOwn(EVENTS, name)) return;
   const spec = EVENTS[name];
-  // CodeBuddy applies the matcher already; re-checking keeps a hand-edited
-  // settings.json from reporting a blocked pane for an unrelated notification.
+  // CodeBuddy applies the matcher already; this survives a hand-edited
+  // settings.json that matches an unrelated notification.
   if (name === 'Notification' && event.notification_type !== 'permission_prompt') return;
 
+  // 'compact' keeps the turn running and /clear keeps the process alive, so
+  // neither matches its row.
+  let state = spec.state;
+  if (name === 'SessionStart' && event.source === 'compact') state = 'working';
+  if (name === 'SessionEnd' && event.reason === 'clear') state = 'idle';
+
   const args = [
-    'pane', spec.state ? 'report-agent' : 'release-agent', HERDR_PANE_ID,
+    'pane', state ? 'report-agent' : 'release-agent', HERDR_PANE_ID,
     '--source', 'custom:codebuddy',
     '--agent', 'codebuddy',
     '--seq', String(Date.now()),
   ];
 
-  if (spec.state) {
-    // Compaction runs mid-turn, before the agent continues, so the pane works.
-    const state = name === 'SessionStart' && event.source === 'compact' ? 'working' : spec.state;
-    args.push('--state', state);
-  }
+  if (state) args.push('--state', state);
   if (name === 'SessionStart' && typeof event.session_id === 'string' && SESSION_ID.test(event.session_id)) {
     args.push('--agent-session-id', event.session_id, '--', 'codebuddy', '--resume', event.session_id);
   }

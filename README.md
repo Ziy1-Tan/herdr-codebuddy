@@ -7,16 +7,13 @@ CodeBuddy hooks report session state to Herdr. This adds no Herdr process or scr
 | CodeBuddy event | Herdr report |
 | --- | --- |
 | `SessionStart` (`startup`, `resume`, `clear`) | `idle`, with the session ID and `codebuddy --resume` command when available |
-| `SessionStart` (`compact`) | `working` — the turn continues after compaction |
+| `SessionStart` (`compact`) | `working` |
 | `UserPromptSubmit` | `working` |
 | `PreToolUse`, `PostToolUse`, `PostToolUseFailure` | `working` |
-| `Stop` | `idle` |
+| `PermissionDenied` | `working` |
+| `Stop`, `StopFailure` | `idle` |
 | `Notification` (`permission_prompt`) | `blocked` |
-| `SessionEnd` | release the agent |
-
-The tool events keep the reported state honest: approving a permission
-prompt otherwise left the pane reported as `blocked` until `Stop`. The
-failure event covers a tool that fails or is interrupted after approval.
+| `SessionEnd` | release the agent; `/clear` reports `idle` |
 
 ## Install
 
@@ -31,7 +28,6 @@ To uninstall:
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Ziy1-Tan/herdr-codebuddy/main/install.sh | sh -s -- uninstall
 ```
-
 
 For a local checkout, run `node install.js install` or `node install.js uninstall`.
 
