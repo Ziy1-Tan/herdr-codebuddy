@@ -23,6 +23,50 @@ const EVENTS = {
 
 const SESSION_ID = /^[a-zA-Z0-9][a-zA-Z0-9:_-]*$/;
 
+// What one hook event should report, or null when it maps to nothing.
+// Pure: reads the event only, no env, no I/O.
+function decide(event) {
+  const name = event?.hook_event_name;
+  if (!Object.hasOwn(EVENTS, name)) return null;
+  // CodeBuddy applies the matcher already; this survives a hand-edited
+  // settings.json that matches an unrelated notification.
+  if (name === 'Notification' && event.notification_type !== 'permission_prompt') return null;
+
+  // 'compact' keeps the turn running and /clear keeps the process alive, so
+  // neither matches its row.
+  let state = EVENTS[name].state;
+  if (name === 'SessionStart' && event.source === 'compact') state = 'working';
+  if (name === 'SessionEnd' && event.reason === 'clear') state = 'idle';
+
+  const sessionId = name === 'SessionStart'
+    && typeof event.session_id === 'string'
+    && SESSION_ID.test(event.session_id)
+    ? event.session_id
+    : null;
+
+  return {
+    name,
+    state,
+    sessionId,
+    message: name === 'Notification' ? 'CodeBuddy permission required' : null,
+  };
+}
+
+// The Herdr argv for one decision. Pure apart from the clock.
+function buildArgs(report, paneId, seq = Date.now()) {
+  const { state, sessionId, message } = report;
+  const args = [
+    'pane', state ? 'report-agent' : 'release-agent', paneId,
+    '--source', 'custom:codebuddy',
+    '--agent', 'codebuddy',
+    '--seq', String(seq),
+  ];
+  if (state) args.push('--state', state);
+  if (sessionId) args.push('--agent-session-id', sessionId, '--', 'codebuddy', '--resume', sessionId);
+  if (message) args.push('--message', message);
+  return args;
+}
+
 async function main() {
   const { HERDR_ENV, HERDR_PANE_ID, HERDR_BIN_PATH } = process.env;
   if (HERDR_ENV !== '1' || !HERDR_PANE_ID || !HERDR_BIN_PATH) return;
@@ -37,31 +81,9 @@ async function main() {
     return;
   }
 
-  const name = event?.hook_event_name;
-  if (!Object.hasOwn(EVENTS, name)) return;
-  const spec = EVENTS[name];
-  // CodeBuddy applies the matcher already; this survives a hand-edited
-  // settings.json that matches an unrelated notification.
-  if (name === 'Notification' && event.notification_type !== 'permission_prompt') return;
-
-  // 'compact' keeps the turn running and /clear keeps the process alive, so
-  // neither matches its row.
-  let state = spec.state;
-  if (name === 'SessionStart' && event.source === 'compact') state = 'working';
-  if (name === 'SessionEnd' && event.reason === 'clear') state = 'idle';
-
-  const args = [
-    'pane', state ? 'report-agent' : 'release-agent', HERDR_PANE_ID,
-    '--source', 'custom:codebuddy',
-    '--agent', 'codebuddy',
-    '--seq', String(Date.now()),
-  ];
-
-  if (state) args.push('--state', state);
-  if (name === 'SessionStart' && typeof event.session_id === 'string' && SESSION_ID.test(event.session_id)) {
-    args.push('--agent-session-id', event.session_id, '--', 'codebuddy', '--resume', event.session_id);
-  }
-  if (name === 'Notification') args.push('--message', 'CodeBuddy permission required');
+  const report = decide(event);
+  if (!report) return;
+  const args = buildArgs(report, HERDR_PANE_ID);
 
   if (process.env.HERDR_CODEBUDDY_DRY_RUN === '1') {
     console.log(JSON.stringify({ binary: HERDR_BIN_PATH, args }));
@@ -74,6 +96,6 @@ async function main() {
   child.unref();
 }
 
-module.exports = { EVENTS };
+module.exports = { EVENTS, decide, buildArgs };
 
 if (require.main === module) main().catch(() => {});

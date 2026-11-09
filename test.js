@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
-const { EVENTS } = require('./herdr-codebuddy-hook.js');
+const { EVENTS, decide, buildArgs } = require('./herdr-codebuddy-hook.js');
 
 const HOOK = path.join(__dirname, 'herdr-codebuddy-hook.js');
 const INSTALLER = path.join(__dirname, 'install.js');
@@ -85,6 +85,34 @@ test('maps lifecycle and permission events to report-agent states', () => {
       ]);
     }
   }
+});
+
+// decide() is the pure core; the subprocess tests below only prove the wiring.
+test('decide ignores unknown, malformed, and unrelated events', () => {
+  assert.equal(decide(null), null);
+  assert.equal(decide('not an object'), null);
+  assert.equal(decide({ hook_event_name: 'NotAnEvent' }), null);
+  assert.equal(decide({ hook_event_name: 'Notification', notification_type: 'idle_prompt' }), null);
+});
+
+test('decide maps one event to one report', () => {
+  assert.deepEqual(decide({ hook_event_name: 'Stop' }), {
+    name: 'Stop', state: 'idle', sessionId: null, message: null,
+  });
+  assert.deepEqual(decide({ hook_event_name: 'Notification', notification_type: 'permission_prompt' }), {
+    name: 'Notification', state: 'blocked', sessionId: null, message: 'CodeBuddy permission required',
+  });
+  assert.equal(decide({ hook_event_name: 'SessionStart', session_id: "bad'id" }).sessionId, null);
+});
+
+test('buildArgs is a pure function of the decision', () => {
+  const report = decide({ hook_event_name: 'SessionStart', session_id: 'session-abc' });
+  assert.deepEqual(buildArgs(report, 'pane-test', 7), [
+    'pane', 'report-agent', 'pane-test',
+    '--source', 'custom:codebuddy', '--agent', 'codebuddy', '--seq', '7',
+    '--state', 'idle',
+    '--agent-session-id', 'session-abc', '--', 'codebuddy', '--resume', 'session-abc',
+  ]);
 });
 
 test('every registered event has a test', () => {
