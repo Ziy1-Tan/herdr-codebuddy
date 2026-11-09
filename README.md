@@ -14,7 +14,7 @@ CodeBuddy hooks report session state to Herdr. This adds no Herdr process or scr
 | `PermissionDenied` | `working` |
 | `Stop`, `StopFailure` | `idle` |
 | `Notification` (`permission_prompt`) | `blocked` |
-| `SessionEnd` | release the agent; `/clear` reports `idle` |
+| `SessionEnd` | release the agent; `/clear` reports nothing (the paired `SessionStart` reports the new session) |
 
 ## Install
 

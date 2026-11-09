@@ -134,11 +134,13 @@ test('releases the reported agent on SessionEnd', () => {
   }
 });
 
-// /clear ends the conversation, not the process.
-test('keeps the pane reported as idle on /clear', () => {
-  const result = runHook('SessionEnd', { reason: 'clear' });
-  assert.deepEqual(result.args.slice(0, 3), ['pane', 'report-agent', 'pane-test']);
-  assert.equal(arg(result, '--state'), 'idle');
+// /clear ends the conversation, not the process, and CodeBuddy pairs
+// SessionEnd(clear) with SessionStart(clear), which reports idle plus the
+// new session id. Reporting here too would race it for the higher --seq,
+// and Herdr drops the loser -- the session id.
+test('reports nothing on /clear', () => {
+  assert.equal(runHook('SessionEnd', { reason: 'clear' }), null);
+  assert.equal(decide({ hook_event_name: 'SessionEnd', reason: 'clear' }), null);
 });
 
 test('ignores unrelated notifications and malformed JSON', () => {

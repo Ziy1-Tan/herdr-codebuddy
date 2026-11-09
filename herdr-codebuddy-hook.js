@@ -18,6 +18,10 @@ const EVENTS = {
   // A turn that ends on an API error sends no Stop.
   StopFailure: { state: 'idle' },
   Notification: { matcher: 'permission_prompt', state: 'blocked' },
+  // /clear pairs this with a SessionStart(clear). Report nothing here: the
+  // seq of each report is Date.now() read after that hook's stdin, so these
+  // back-to-back reports can invert order, and Herdr drops the lower seq --
+  // losing the new session id that a Herdr restart would restore.
   SessionEnd: {},
 };
 
@@ -32,11 +36,11 @@ function decide(event) {
   // settings.json that matches an unrelated notification.
   if (name === 'Notification' && event.notification_type !== 'permission_prompt') return null;
 
-  // 'compact' keeps the turn running and /clear keeps the process alive, so
-  // neither matches its row.
+  // 'compact' keeps the turn running, so it stays working; /clear's
+  // SessionEnd is skipped entirely (see the SessionEnd row above).
   let state = EVENTS[name].state;
   if (name === 'SessionStart' && event.source === 'compact') state = 'working';
-  if (name === 'SessionEnd' && event.reason === 'clear') state = 'idle';
+  if (name === 'SessionEnd' && event.reason === 'clear') return null;
 
   const sessionId = name === 'SessionStart'
     && typeof event.session_id === 'string'
