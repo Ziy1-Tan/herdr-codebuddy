@@ -2,6 +2,9 @@
 'use strict';
 
 const { spawn } = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
 // Shared with install.js: the matcher to register and the state to report.
 const EVENTS = {
@@ -94,9 +97,22 @@ async function main() {
     return;
   }
 
-  // Detached so a slow Herdr never holds up the CodeBuddy turn.
+  // Detached so a slow Herdr never holds up the CodeBuddy turn. Waiting for
+  // spawn/error only learns whether exec happened (milliseconds); it never
+  // waits on Herdr itself.
   const child = spawn(HERDR_BIN_PATH, args, { detached: true, stdio: 'ignore', windowsHide: true });
-  child.on('error', () => {});
+  await new Promise(resolve => {
+    child.once('spawn', resolve);
+    child.once('error', error => {
+      // Herdr's contract says to ignore failures. One log line keeps a dead
+      // binary from being a mystery; delete the file whenever.
+      try {
+        const line = `${new Date().toISOString()} ${report.name}: spawn ${JSON.stringify(HERDR_BIN_PATH)} failed (${error.code || error.message})\n`;
+        fs.appendFileSync(path.join(os.homedir(), '.codebuddy', 'hooks', 'herdr-codebuddy.log'), line);
+      } catch { /* nowhere to log, nowhere to complain */ }
+      resolve();
+    });
+  });
   child.unref();
 }
 

@@ -143,6 +143,30 @@ test('reports nothing on /clear', () => {
   assert.equal(decide({ hook_event_name: 'SessionEnd', reason: 'clear' }), null);
 });
 
+test('logs a spawn failure and still exits cleanly', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'herdr-codebuddy-log-'));
+  try {
+    fs.mkdirSync(path.join(home, '.codebuddy', 'hooks'), { recursive: true });
+    const stdout = execFileSync(process.execPath, [HOOK], {
+      input: JSON.stringify({ hook_event_name: 'Stop' }),
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        HERDR_ENV: '1',
+        HERDR_PANE_ID: 'pane-test',
+        HERDR_BIN_PATH: '/nonexistent/herdr',
+        HOME: home,
+        USERPROFILE: home,
+      },
+    }).trim();
+    assert.equal(stdout, '');
+    const log = fs.readFileSync(path.join(home, '.codebuddy', 'hooks', 'herdr-codebuddy.log'), 'utf8');
+    assert.match(log, / Stop: spawn ".*" failed \(ENOENT\)\n$/);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('ignores unrelated notifications and malformed JSON', () => {
   assert.equal(runHook('Notification', { notification_type: 'idle_prompt' }), null);
   const stdout = execFileSync(process.execPath, [HOOK], {
