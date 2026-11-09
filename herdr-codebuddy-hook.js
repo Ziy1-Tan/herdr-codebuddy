@@ -59,8 +59,19 @@ function decide(event) {
   };
 }
 
-// The Herdr argv for one decision. Pure apart from the clock.
-function buildArgs(report, paneId, seq = Date.now()) {
+// Herdr accepts a report only when --seq is strictly higher than the last
+// one it accepted from this source: measured on 0.9.x, an equal or lower
+// seq is dropped. Wall-clock milliseconds collide across two hook
+// processes, so add the monotonic clock's sub-millisecond nanoseconds for
+// the low digits. The wall-clock high digits keep the value
+// rising across machine restarts, which the monotonic clock alone would
+// not. About 1.8e18, far inside Herdr's u64 --seq.
+function currentSeq() {
+  return (BigInt(Date.now()) * 1000000n + (process.hrtime.bigint() % 1000000n)).toString();
+}
+
+// The Herdr argv for one decision.
+function buildArgs(report, paneId, seq = currentSeq()) {
   const { state, sessionId, message } = report;
   const args = [
     'pane', state ? 'report-agent' : 'release-agent', paneId,
@@ -116,6 +127,6 @@ async function main() {
   child.unref();
 }
 
-module.exports = { EVENTS, decide, buildArgs };
+module.exports = { EVENTS, decide, buildArgs, currentSeq };
 
 if (require.main === module) main().catch(() => {});

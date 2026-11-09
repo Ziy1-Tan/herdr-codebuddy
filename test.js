@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
-const { EVENTS, decide, buildArgs } = require('./herdr-codebuddy-hook.js');
+const { EVENTS, decide, buildArgs, currentSeq } = require('./herdr-codebuddy-hook.js');
 
 const HOOK = path.join(__dirname, 'herdr-codebuddy-hook.js');
 const INSTALLER = path.join(__dirname, 'install.js');
@@ -77,7 +77,7 @@ test('maps lifecycle and permission events to report-agent states', () => {
     assert.equal(arg(result, '--state'), state);
     assert.equal(arg(result, '--source'), 'custom:codebuddy');
     assert.equal(arg(result, '--agent'), 'codebuddy');
-    assert.ok(Number(arg(result, '--seq')) > 0);
+    assert.ok(Number(arg(result, '--seq')) >= 1e18);
     if (event === 'SessionStart') {
       assert.equal(arg(result, '--agent-session-id'), payload.session_id);
       assert.deepEqual(result.args.slice(result.args.indexOf('--') + 1), [
@@ -113,6 +113,13 @@ test('buildArgs is a pure function of the decision', () => {
     '--state', 'idle',
     '--agent-session-id', 'session-abc', '--', 'codebuddy', '--resume', 'session-abc',
   ]);
+});
+
+test('seq is nanosecond-scale, decimal, and strictly increasing', async () => {
+  const first = currentSeq();
+  assert.match(first, /^\d{19}$/);
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.ok(BigInt(currentSeq()) > BigInt(first));
 });
 
 test('every registered event has a test', () => {
