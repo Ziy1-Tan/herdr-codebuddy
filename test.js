@@ -177,6 +177,20 @@ test('ignores unrelated notifications and malformed JSON', () => {
   assert.equal(stdout, '');
 });
 
+// isOurHook matches on the file name alone, so a command that merely
+// mentions the hook file counts as ours and is removed -- including an
+// unrelated one like the rm below. Deliberate: a strict match would leave a
+// duplicate behind when an older install quoted the command differently.
+test('install treats any command mentioning the hook file as ours', () => withHome(home => {
+  const { settingsFile, install } = home;
+  fs.mkdirSync(path.dirname(settingsFile), { recursive: true });
+  fs.writeFileSync(settingsFile, JSON.stringify({
+    hooks: { Stop: [{ hooks: [{ type: 'command', command: 'rm ~/.codebuddy/hooks/herdr-codebuddy-hook.js' }] }] },
+  }));
+  install('uninstall');
+  assert.deepEqual(JSON.parse(fs.readFileSync(settingsFile, 'utf8')), {});
+}));
+
 test('uninstall leaves settings alone when the adapter is absent', () => withHome(home => {
   const { settingsFile, install } = home;
   fs.mkdirSync(path.dirname(settingsFile), { recursive: true });
