@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
-const { EVENTS } = require('./herdr-codebuddy-hook.js');
+const { EVENTS, decide, buildArgs, currentSeq } = require('./herdr-codebuddy-hook.js');
 
 const HOOK = path.join(__dirname, 'herdr-codebuddy-hook.js');
 const INSTALLER = path.join(__dirname, 'install.js');
@@ -77,7 +77,7 @@ test('maps lifecycle and permission events to report-agent states', () => {
     assert.equal(arg(result, '--state'), state);
     assert.equal(arg(result, '--source'), 'custom:codebuddy');
     assert.equal(arg(result, '--agent'), 'codebuddy');
-    assert.ok(Number(arg(result, '--seq')) > 0);
+    assert.ok(Number(arg(result, '--seq')) >= 1e18);
     if (event === 'SessionStart') {
       assert.equal(arg(result, '--agent-session-id'), payload.session_id);
       assert.deepEqual(result.args.slice(result.args.indexOf('--') + 1), [
@@ -85,6 +85,41 @@ test('maps lifecycle and permission events to report-agent states', () => {
       ]);
     }
   }
+});
+
+// decide() is the pure core; the subprocess tests below only prove the wiring.
+test('decide ignores unknown, malformed, and unrelated events', () => {
+  assert.equal(decide(null), null);
+  assert.equal(decide('not an object'), null);
+  assert.equal(decide({ hook_event_name: 'NotAnEvent' }), null);
+  assert.equal(decide({ hook_event_name: 'Notification', notification_type: 'idle_prompt' }), null);
+});
+
+test('decide maps one event to one report', () => {
+  assert.deepEqual(decide({ hook_event_name: 'Stop' }), {
+    name: 'Stop', state: 'idle', sessionId: null, message: null,
+  });
+  assert.deepEqual(decide({ hook_event_name: 'Notification', notification_type: 'permission_prompt' }), {
+    name: 'Notification', state: 'blocked', sessionId: null, message: 'CodeBuddy permission required',
+  });
+  assert.equal(decide({ hook_event_name: 'SessionStart', session_id: "bad'id" }).sessionId, null);
+});
+
+test('buildArgs is a pure function of the decision', () => {
+  const report = decide({ hook_event_name: 'SessionStart', session_id: 'session-abc' });
+  assert.deepEqual(buildArgs(report, 'pane-test', 7), [
+    'pane', 'report-agent', 'pane-test',
+    '--source', 'custom:codebuddy', '--agent', 'codebuddy', '--seq', '7',
+    '--state', 'idle',
+    '--agent-session-id', 'session-abc', '--', 'codebuddy', '--resume', 'session-abc',
+  ]);
+});
+
+test('seq is nanosecond-scale, decimal, and strictly increasing', async () => {
+  const first = currentSeq();
+  assert.match(first, /^\d{19}$/);
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.ok(BigInt(currentSeq()) > BigInt(first));
 });
 
 test('every registered event has a test', () => {
@@ -106,11 +141,37 @@ test('releases the reported agent on SessionEnd', () => {
   }
 });
 
-// /clear ends the conversation, not the process.
-test('keeps the pane reported as idle on /clear', () => {
-  const result = runHook('SessionEnd', { reason: 'clear' });
-  assert.deepEqual(result.args.slice(0, 3), ['pane', 'report-agent', 'pane-test']);
-  assert.equal(arg(result, '--state'), 'idle');
+// /clear ends the conversation, not the process, and CodeBuddy pairs
+// SessionEnd(clear) with SessionStart(clear), which reports idle plus the
+// new session id. Reporting here too would race it for the higher --seq,
+// and Herdr drops the loser -- the session id.
+test('reports nothing on /clear', () => {
+  assert.equal(runHook('SessionEnd', { reason: 'clear' }), null);
+  assert.equal(decide({ hook_event_name: 'SessionEnd', reason: 'clear' }), null);
+});
+
+test('logs a spawn failure and still exits cleanly', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'herdr-codebuddy-log-'));
+  try {
+    fs.mkdirSync(path.join(home, '.codebuddy', 'hooks'), { recursive: true });
+    const stdout = execFileSync(process.execPath, [HOOK], {
+      input: JSON.stringify({ hook_event_name: 'Stop' }),
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        HERDR_ENV: '1',
+        HERDR_PANE_ID: 'pane-test',
+        HERDR_BIN_PATH: '/nonexistent/herdr',
+        HOME: home,
+        USERPROFILE: home,
+      },
+    }).trim();
+    assert.equal(stdout, '');
+    const log = fs.readFileSync(path.join(home, '.codebuddy', 'hooks', 'herdr-codebuddy.log'), 'utf8');
+    assert.match(log, / Stop: spawn ".*" failed \(ENOENT\)\n$/);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test('ignores unrelated notifications and malformed JSON', () => {
@@ -122,6 +183,20 @@ test('ignores unrelated notifications and malformed JSON', () => {
   }).trim();
   assert.equal(stdout, '');
 });
+
+// isOurHook matches on the file name alone, so a command that merely
+// mentions the hook file counts as ours and is removed -- including an
+// unrelated one like the rm below. Deliberate: a strict match would leave a
+// duplicate behind when an older install quoted the command differently.
+test('install treats any command mentioning the hook file as ours', () => withHome(home => {
+  const { settingsFile, install } = home;
+  fs.mkdirSync(path.dirname(settingsFile), { recursive: true });
+  fs.writeFileSync(settingsFile, JSON.stringify({
+    hooks: { Stop: [{ hooks: [{ type: 'command', command: 'rm ~/.codebuddy/hooks/herdr-codebuddy-hook.js' }] }] },
+  }));
+  install('uninstall');
+  assert.deepEqual(JSON.parse(fs.readFileSync(settingsFile, 'utf8')), {});
+}));
 
 test('uninstall leaves settings alone when the adapter is absent', () => withHome(home => {
   const { settingsFile, install } = home;
