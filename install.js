@@ -100,23 +100,20 @@ function main() {
   else delete updated.hooks;
 
   const changed = JSON.stringify(settings) !== JSON.stringify(updated);
-  let backup = null;
   if (changed) {
     if (original !== null) {
-      backup = `${settingsFile}.herdr-codebuddy-${Date.now()}.bak`;
-      fs.copyFileSync(settingsFile, backup);
+      fs.copyFileSync(settingsFile, `${settingsFile}.herdr-codebuddy-${Date.now()}.bak`);
     }
     writeSettings(settingsFile, `${JSON.stringify(updated, null, 2)}\n`);
   }
-  const backupNote = backup ? ` (backup: ${backup})` : '';
 
   if (action === 'uninstall') {
     const existed = fs.existsSync(hookFile) || fs.existsSync(`${hookFile}.bak`);
     fs.rmSync(hookFile, { force: true });
     fs.rmSync(`${hookFile}.bak`, { force: true });
     console.log(changed || existed
-      ? `Removed Herdr CodeBuddy hooks from ${settingsFile}${backupNote}.`
-      : `No Herdr CodeBuddy hooks in ${settingsFile}.`);
+      ? 'Herdr CodeBuddy hooks removed.'
+      : 'Herdr CodeBuddy hooks not installed.');
     return;
   }
 
@@ -132,10 +129,8 @@ function main() {
     fs.copyFileSync(sourceFile, hookFile);
   }
 
-  if (changed) console.log(`Installed hooks in ${settingsFile}${backupNote}.`);
-  else if (!replaced) console.log(`Hooks already installed in ${settingsFile}.`);
-  if (replaced) console.log(`Replaced hook script ${hookFile} (backup: ${hookFile}.bak).`);
-  console.log('Restart CodeBuddy to load them.');
+  const status = changed || replaced ? 'installed' : 'already installed';
+  console.log(`Herdr CodeBuddy hooks ${status}. Restart CodeBuddy to load them.`);
 }
 
 try {
